@@ -1,4 +1,4 @@
-module github.com/dathan/go-pagerduty-jwt-stats
+module github.com/dathan/go-jira-jwt-stats
 
 go 1.26
 

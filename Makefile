@@ -40,8 +40,8 @@ setup:
 	@# Copy .env if missing
 	@[ -f .env ] || (cp .env.example .env && echo "  Created .env from .env.example — fill in secrets before running")
 	@[ -f frontend/.env ] || (cp frontend/.env.example frontend/.env && echo "  Created frontend/.env")
-	@# ── Rename go-pagerduty-jwt-stats → PROJECT_NAME (idempotent) ──────────────
-	@# Read current module owner+name from go.mod, e.g. "github.com/dathan/go-pagerduty-jwt-stats"
+	@# ── Rename go-jira-jwt-stats → PROJECT_NAME (idempotent) ──────────────
+	@# Read current module owner+name from go.mod, e.g. "github.com/dathan/go-jira-jwt-stats"
 	@CURR_MODULE=$$(grep '^module ' go.mod | awk '{print $$2}'); \
 	CURR_OWNER=$$(echo "$$CURR_MODULE" | sed -E 's|github.com/([^/]+)/.*|\1|'); \
 	CURR_NAME=$$(echo "$$CURR_MODULE" | sed -E 's|.*/([^/]+)$$|\1|'); \

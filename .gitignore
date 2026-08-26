@@ -23,7 +23,7 @@ vendor
 /api
 /bin
 
-# PagerDuty curl files contain session cookies — never commit
+# Jira curl files contain session cookies — never commit
 conf/*.curl
 *.curl
 
