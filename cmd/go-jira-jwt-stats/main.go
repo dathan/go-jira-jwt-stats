@@ -140,10 +140,43 @@ type dashData struct {
 	OldestJSON        string
 	CalloutsJSON      string
 	IssuesJSON        string
+
+	// Per-KPI JQL links — each card on the dashboard opens the matching
+	// filtered view directly in Jira.
+	HomeJQLEncoded         string
+	ExternalJQLEncoded     string
+	OverdueJQLEncoded      string
+	UnassignedJQLEncoded   string
+	HighPriorityJQLEncoded string
+	AgeJQLEncoded          string
 }
 
 // curlCookieRE extracts the -b '...' cookie value from a curl command.
 var curlCookieRE = regexp.MustCompile(`(?s)-b\s+'([^']+)'`)
+
+// orderByRE splits a trailing "ORDER BY ..." clause off a JQL string so
+// additional AND conditions can be inserted before it.
+var orderByRE = regexp.MustCompile(`(?i)\s+order\s+by\s+.*$`)
+
+// splitJQL separates the filter portion of a JQL string from its trailing
+// ORDER BY clause (if any).
+func splitJQL(jql string) (where, orderBy string) {
+	loc := orderByRE.FindStringIndex(jql)
+	if loc == nil {
+		return jql, ""
+	}
+	return jql[:loc[0]], jql[loc[0]:]
+}
+
+// quoteJQLList renders a Go string slice as a double-quoted, comma-separated
+// JQL value list, e.g. ["A","B"] -> `"A", "B"`.
+func quoteJQLList(items []string) string {
+	quoted := make([]string, len(items))
+	for i, v := range items {
+		quoted[i] = fmt.Sprintf("%q", v)
+	}
+	return strings.Join(quoted, ", ")
+}
 
 // parseCurlCookies reads a curl command string and returns the cookie header value
 // found after the -b '...' flag. This lets you paste a curl from DevTools directly
@@ -611,6 +644,19 @@ func buildDash(issues []jiraIssue, baseURL, jql string, members, homeProjects []
 		avgAgeDays = totalAgeDays / len(issues)
 	}
 
+	// Per-KPI JQL, each reusing the same filter base as the fetch query so a
+	// dashboard card always opens the exact Jira view it summarizes.
+	where, order := splitJQL(jql)
+	if order == "" {
+		order = " ORDER BY due ASC, created ASC"
+	}
+	homeJQL := fmt.Sprintf("%s AND project in (%s)%s", where, quoteJQLList(homeProjects), order)
+	externalJQL := fmt.Sprintf("%s AND project not in (%s)%s", where, quoteJQLList(homeProjects), order)
+	overdueJQL := fmt.Sprintf("%s AND due < now()%s", where, order)
+	unassignedJQL := fmt.Sprintf("%s AND assignee is EMPTY%s", where, order)
+	highPriorityJQL := fmt.Sprintf(`%s AND priority in ("Highest", "High")%s`, where, order)
+	ageJQL := fmt.Sprintf("%s ORDER BY created ASC", where)
+
 	mustJSON := func(v any) string {
 		b, err := json.Marshal(v)
 		if err != nil {
@@ -643,6 +689,13 @@ func buildDash(issues []jiraIssue, baseURL, jql string, members, homeProjects []
 		OldestJSON:        mustJSON(oldestIssues),
 		CalloutsJSON:      mustJSON(callouts),
 		IssuesJSON:        mustJSON(jsIssues),
+
+		HomeJQLEncoded:         url.QueryEscape(homeJQL),
+		ExternalJQLEncoded:     url.QueryEscape(externalJQL),
+		OverdueJQLEncoded:      url.QueryEscape(overdueJQL),
+		UnassignedJQLEncoded:   url.QueryEscape(unassignedJQL),
+		HighPriorityJQLEncoded: url.QueryEscape(highPriorityJQL),
+		AgeJQLEncoded:          url.QueryEscape(ageJQL),
 	}
 }
 

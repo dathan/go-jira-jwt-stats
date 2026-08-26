@@ -19,6 +19,7 @@ const DashboardTemplate = `<!DOCTYPE html>
     .card { background: rgba(255,255,255,0.035); border: 1px solid rgba(255,255,255,0.07); border-radius: 12px; }
     .kpi-card { background: linear-gradient(135deg, rgba(255,255,255,0.04) 0%, rgba(255,255,255,0.02) 100%); border: 1px solid rgba(255,255,255,0.08); border-radius: 14px; transition: border-color 0.2s; }
     .kpi-card:hover { border-color: rgba(118,185,0,0.3); }
+    a.kpi-card { display: block; text-decoration: none; color: inherit; cursor: pointer; }
     .scope-pill { display: inline-flex; align-items: center; font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 99px; font-family: 'JetBrains Mono', monospace; }
     .badge { font-size: 10px; font-weight: 700; padding: 2px 7px; border-radius: 4px; text-transform: uppercase; letter-spacing: 0.05em; }
     .priority-highest, .priority-high { background: rgba(239,68,68,0.15); color: #fca5a5; border: 1px solid rgba(239,68,68,0.25); }
@@ -71,54 +72,54 @@ const DashboardTemplate = `<!DOCTYPE html>
   </header>
 
   <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 mb-6">
-    <div class="kpi-card p-4">
+    <a href="{{.BaseURL}}/issues/?jql={{.JQLEncoded}}" target="_blank" class="kpi-card p-4">
       <div class="text-xs text-slate-500 font-semibold uppercase tracking-widest mb-1.5">Total Open</div>
       <div class="text-3xl font-black text-white">{{.TotalOpen}}</div>
       <div class="text-xs text-slate-600 mt-1">unresolved, all projects</div>
-    </div>
-    <div class="kpi-card p-4">
+    </a>
+    <a href="{{.BaseURL}}/issues/?jql={{.HomeJQLEncoded}}" target="_blank" class="kpi-card p-4">
       <div class="text-xs text-slate-500 font-semibold uppercase tracking-widest mb-1.5">Home Backlog</div>
       <div class="text-3xl font-black" style="color:#76b900">{{.HomeCount}}</div>
       <div class="text-xs text-slate-600 mt-1">in {{.HomeProjects}}</div>
-    </div>
-    <div class="kpi-card p-4">
+    </a>
+    <a href="{{.BaseURL}}/issues/?jql={{.ExternalJQLEncoded}}" target="_blank" class="kpi-card p-4">
       <div class="text-xs text-slate-500 font-semibold uppercase tracking-widest mb-1.5">External Asks</div>
       <div class="text-3xl font-black text-sky-400">{{.ExternalCount}}</div>
       <div class="text-xs text-slate-600 mt-1">outside home projects</div>
-    </div>
-    <div class="kpi-card p-4">
+    </a>
+    <a href="{{.BaseURL}}/issues/?jql={{.OverdueJQLEncoded}}" target="_blank" class="kpi-card p-4">
       <div class="text-xs text-slate-500 font-semibold uppercase tracking-widest mb-1.5">Overdue</div>
       <div class="text-3xl font-black text-red-400">{{.OverdueCount}}</div>
       <div class="text-xs text-slate-600 mt-1">past due date</div>
-    </div>
-    <div class="kpi-card p-4">
+    </a>
+    <a href="{{.BaseURL}}/issues/?jql={{.UnassignedJQLEncoded}}" target="_blank" class="kpi-card p-4">
       <div class="text-xs text-slate-500 font-semibold uppercase tracking-widest mb-1.5">Unassigned</div>
       <div class="text-3xl font-black text-amber-400">{{.UnassignedCount}}</div>
       <div class="text-xs text-slate-600 mt-1">no assignee set</div>
-    </div>
-    <div class="kpi-card p-4">
+    </a>
+    <a href="{{.BaseURL}}/issues/?jql={{.JQLEncoded}}" target="_blank" class="kpi-card p-4">
       <div class="text-xs text-slate-500 font-semibold uppercase tracking-widest mb-1.5">Projects</div>
       <div class="text-3xl font-black text-violet-400">{{.ProjectCount}}</div>
       <div class="text-xs text-slate-600 mt-1">touched by the team</div>
-    </div>
+    </a>
   </div>
 
   <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
-    <div class="kpi-card p-4">
+    <a href="{{.BaseURL}}/issues/?jql={{.AgeJQLEncoded}}" target="_blank" class="kpi-card p-4">
       <div class="text-xs text-slate-500 font-semibold uppercase tracking-widest mb-1.5">Oldest Open</div>
       <div class="text-3xl font-black text-rose-400">{{.OldestDays}}<span class="text-base font-semibold text-slate-500">d</span></div>
       <div class="text-xs text-slate-600 mt-1">age of the oldest issue</div>
-    </div>
-    <div class="kpi-card p-4">
+    </a>
+    <a href="{{.BaseURL}}/issues/?jql={{.AgeJQLEncoded}}" target="_blank" class="kpi-card p-4">
       <div class="text-xs text-slate-500 font-semibold uppercase tracking-widest mb-1.5">Avg Age</div>
       <div class="text-3xl font-black text-slate-200">{{.AvgAgeDays}}<span class="text-base font-semibold text-slate-500">d</span></div>
       <div class="text-xs text-slate-600 mt-1">across all open issues</div>
-    </div>
-    <div class="kpi-card p-4">
+    </a>
+    <a href="{{.BaseURL}}/issues/?jql={{.HighPriorityJQLEncoded}}" target="_blank" class="kpi-card p-4">
       <div class="text-xs text-slate-500 font-semibold uppercase tracking-widest mb-1.5">High Priority+</div>
       <div class="text-3xl font-black text-red-400">{{.HighPriorityCount}}</div>
       <div class="text-xs text-slate-600 mt-1">Highest/High open issues</div>
-    </div>
+    </a>
     <div class="kpi-card p-4">
       <div class="text-xs text-slate-500 font-semibold uppercase tracking-widest mb-1.5">Overloaded</div>
       <div class="text-3xl font-black text-amber-400">{{.OverloadedCount}}</div>
