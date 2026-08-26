@@ -223,6 +223,9 @@ const BASE_URL       = {{.BaseURLJSON}};
 // ── Colour palette ───────────────────────────────────────────────────────────
 const PALETTE = ['#38bdf8','#a78bfa','#84cc16','#fbbf24','#fb923c','#f472b6','#2dd4bf','#76b900','#f87171','#c084fc'];
 function colorFor(key, list) { const i = list.indexOf(key); return PALETTE[i % PALETTE.length] || '#64748b'; }
+function keyLink(key) {
+  return '<a href="'+BASE_URL+'/browse/'+key+'" target="_blank" class="mono text-slate-300 hover:text-lime-400 hover:underline" style="font-size:inherit">'+key+'</a>';
+}
 
 // ── Build filter dropdowns from data ──────────────────────────────────────────
 (function() {
@@ -403,7 +406,7 @@ Chart.defaults.font  = {family:"'Inter',system-ui,sans-serif", size:11};
 (function(){
   document.getElementById('oldestTable').innerHTML = OLDEST_DATA.map(i => {
     return '<tr>'
-      + '<td class="mono text-slate-500 text-xs">'+i.key+'</td>'
+      + '<td class="text-xs">'+keyLink(i.key)+'</td>'
       + '<td class="text-slate-200 text-xs font-medium" style="max-width:320px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+i.summary+'</td>'
       + '<td class="mono text-slate-400 text-xs">'+i.project+'</td>'
       + '<td class="text-slate-300 text-xs">'+i.assignee+'</td>'
@@ -476,7 +479,7 @@ function renderTable() {
     const scopeCol = i.scope === 'home' ? '#76b900' : '#38bdf8';
     const overdue = i.overdue ? '<span class="overdue-dot mr-1"></span>' : '';
     return '<tr>'
-      + '<td class="mono text-slate-500 text-xs">'+i.key+'</td>'
+      + '<td class="text-xs">'+keyLink(i.key)+'</td>'
       + '<td class="text-slate-200 text-xs font-medium" style="max-width:320px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+i.summary+'</td>'
       + '<td class="mono text-slate-400 text-xs">'+i.project+'</td>'
       + '<td><span class="scope-pill" style="background:'+scopeCol+'22;color:'+scopeCol+';border:1px solid '+scopeCol+'44">'+i.scope+'</span></td>'
