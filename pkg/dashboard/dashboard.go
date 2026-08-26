@@ -30,6 +30,9 @@ const DashboardTemplate = `<!DOCTYPE html>
     .status-done  { background: rgba(118,185,0,0.12); color: #84cc16; border: 1px solid rgba(118,185,0,0.2); }
     table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
     thead th { background: rgba(255,255,255,0.04); padding: 10px 14px; text-align: left; font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: #94a3b8; border-bottom: 1px solid rgba(255,255,255,0.07); white-space: nowrap; }
+    thead th.sortable { cursor: pointer; user-select: none; }
+    thead th.sortable:hover { color: #e2e8f0; }
+    .sort-ind { display: inline-block; width: 12px; color: #76b900; }
     tbody tr { border-bottom: 1px solid rgba(255,255,255,0.04); transition: background 0.1s; }
     tbody tr:hover { background: rgba(255,255,255,0.03); }
     tbody td { padding: 9px 14px; vertical-align: middle; }
@@ -158,8 +161,12 @@ const DashboardTemplate = `<!DOCTYPE html>
     <h2 class="text-sm font-semibold text-slate-300 mb-4">Assignee Breakdown <span class="text-slate-500 font-normal text-xs">— open workload per person</span></h2>
     <div class="overflow-x-auto">
       <table>
-        <thead><tr>
-          <th>Assignee</th><th>Open</th><th>Projects</th><th>Overdue</th><th>% of Total</th>
+        <thead id="assigneeHead"><tr>
+          <th class="sortable" data-field="name">Assignee<span class="sort-ind"></span></th>
+          <th class="sortable" data-field="count">Open<span class="sort-ind"></span></th>
+          <th>Projects</th>
+          <th class="sortable" data-field="overdue">Overdue<span class="sort-ind"></span></th>
+          <th>% of Total</th>
         </tr></thead>
         <tbody id="assigneeTable"></tbody>
       </table>
@@ -170,8 +177,15 @@ const DashboardTemplate = `<!DOCTYPE html>
     <h2 class="text-sm font-semibold text-slate-300 mb-4">Oldest Open Items <span class="text-slate-500 font-normal text-xs">— top 10 by age, oldest first</span></h2>
     <div class="overflow-x-auto">
       <table>
-        <thead><tr>
-          <th>Key</th><th>Summary</th><th>Project</th><th>Assignee</th><th>Priority</th><th>Created</th><th>Age</th><th></th>
+        <thead id="oldestHead"><tr>
+          <th class="sortable" data-field="key">Key<span class="sort-ind"></span></th>
+          <th class="sortable" data-field="summary">Summary<span class="sort-ind"></span></th>
+          <th class="sortable" data-field="project">Project<span class="sort-ind"></span></th>
+          <th class="sortable" data-field="assignee">Assignee<span class="sort-ind"></span></th>
+          <th class="sortable" data-field="priority">Priority<span class="sort-ind"></span></th>
+          <th class="sortable" data-field="created">Created<span class="sort-ind"></span></th>
+          <th class="sortable" data-field="ageDays">Age<span class="sort-ind"></span></th>
+          <th></th>
         </tr></thead>
         <tbody id="oldestTable"></tbody>
       </table>
@@ -194,8 +208,16 @@ const DashboardTemplate = `<!DOCTYPE html>
     </div>
     <div class="overflow-x-auto">
       <table>
-        <thead><tr>
-          <th>Key</th><th>Summary</th><th>Project</th><th>Scope</th><th>Assignee</th><th>Status</th><th>Priority</th><th>Due</th><th></th>
+        <thead id="issueHead"><tr>
+          <th class="sortable" data-field="key">Key<span class="sort-ind"></span></th>
+          <th class="sortable" data-field="summary">Summary<span class="sort-ind"></span></th>
+          <th class="sortable" data-field="project">Project<span class="sort-ind"></span></th>
+          <th class="sortable" data-field="scope">Scope<span class="sort-ind"></span></th>
+          <th class="sortable" data-field="assignee">Assignee<span class="sort-ind"></span></th>
+          <th class="sortable" data-field="status">Status<span class="sort-ind"></span></th>
+          <th class="sortable" data-field="priority">Priority<span class="sort-ind"></span></th>
+          <th class="sortable" data-field="due">Due<span class="sort-ind"></span></th>
+          <th></th>
         </tr></thead>
         <tbody id="issueTable"></tbody>
       </table>
@@ -225,6 +247,42 @@ const PALETTE = ['#38bdf8','#a78bfa','#84cc16','#fbbf24','#fb923c','#f472b6','#2
 function colorFor(key, list) { const i = list.indexOf(key); return PALETTE[i % PALETTE.length] || '#64748b'; }
 function keyLink(key) {
   return '<a href="'+BASE_URL+'/browse/'+key+'" target="_blank" class="mono text-slate-300 hover:text-lime-400 hover:underline" style="font-size:inherit">'+key+'</a>';
+}
+
+// ── Sorting ────────────────────────────────────────────────────────────────────
+const PRIORITY_ORDER = ['Highest','High','Medium','Low','Lowest'];
+function priorityRank(p) {
+  const i = PRIORITY_ORDER.findIndex(x => x.toLowerCase() === (p||'').toLowerCase());
+  return i === -1 ? PRIORITY_ORDER.length : i;
+}
+
+// sortRows returns a new array sorted by field/dir. valueFn maps (row, field) -> comparable value;
+// priority fields sort by rank order (Highest first), everything else falls back to string/number compare.
+function sortRows(rows, field, dir, valueFn) {
+  return rows.slice().sort((a, b) => {
+    const av = valueFn(a, field), bv = valueFn(b, field);
+    const cmp = (typeof av === 'number' && typeof bv === 'number')
+      ? av - bv
+      : String(av).localeCompare(String(bv));
+    return cmp * dir;
+  });
+}
+
+// attachSort wires click handlers onto a <thead>'s sortable <th data-field> cells. state is a
+// mutable {field, dir} object; clicking the active column flips direction, clicking a new column
+// resets to ascending. renderFn is called after every change to redraw the owning table.
+function attachSort(theadId, state, renderFn) {
+  const ths = document.querySelectorAll('#'+theadId+' th[data-field]');
+  ths.forEach(th => {
+    th.addEventListener('click', () => {
+      const field = th.dataset.field;
+      if (state.field === field) { state.dir *= -1; } else { state.field = field; state.dir = 1; }
+      ths.forEach(h => { const ind = h.querySelector('.sort-ind'); if (ind) ind.textContent = ''; });
+      const ind = th.querySelector('.sort-ind');
+      if (ind) ind.textContent = state.dir === 1 ? '▲' : '▼';
+      renderFn();
+    });
+  });
 }
 
 // ── Build filter dropdowns from data ──────────────────────────────────────────
@@ -349,14 +407,7 @@ Chart.defaults.font  = {family:"'Inter',system-ui,sans-serif", size:11};
 
 // Priority bar
 (function(){
-  const order = ['Highest','High','Medium','Low','Lowest'];
-  const keys = Object.keys(PRIORITY_DATA).sort((a,b) => {
-    const ia = order.indexOf(a), ib = order.indexOf(b);
-    if (ia === -1 && ib === -1) return PRIORITY_DATA[b]-PRIORITY_DATA[a];
-    if (ia === -1) return 1;
-    if (ib === -1) return -1;
-    return ia - ib;
-  });
+  const keys = Object.keys(PRIORITY_DATA).sort((a,b) => priorityRank(a) - priorityRank(b));
   const col = k => { const l = k.toLowerCase();
     if (l.includes('highest') || l === 'high') return '#f87171';
     if (l.includes('medium')) return '#fbbf24';
@@ -403,8 +454,17 @@ Chart.defaults.font  = {family:"'Inter',system-ui,sans-serif", size:11};
 })();
 
 // Oldest open items table
-(function(){
-  document.getElementById('oldestTable').innerHTML = OLDEST_DATA.map(i => {
+const OLDEST_SORT = { field: null, dir: 1 };
+function oldestSortValue(i, field) {
+  if (field === 'priority') return priorityRank(i.priority);
+  if (field === 'ageDays') return i.ageDays;
+  return (i[field] || '').toString().toLowerCase();
+}
+function renderOldestTable() {
+  const rows = OLDEST_SORT.field
+    ? sortRows(OLDEST_DATA, OLDEST_SORT.field, OLDEST_SORT.dir, oldestSortValue)
+    : OLDEST_DATA;
+  document.getElementById('oldestTable').innerHTML = rows.map(i => {
     return '<tr>'
       + '<td class="text-xs">'+keyLink(i.key)+'</td>'
       + '<td class="text-slate-200 text-xs font-medium" style="max-width:320px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+i.summary+'</td>'
@@ -416,12 +476,22 @@ Chart.defaults.font  = {family:"'Inter',system-ui,sans-serif", size:11};
       + '<td><a href="'+BASE_URL+'/browse/'+i.key+'" target="_blank" style="color:#334155;font-size:12px" onmouseover="this.style.color=\'#84cc16\'" onmouseout="this.style.color=\'#334155\'">&#8599;</a></td>'
       + '</tr>';
   }).join('');
-})();
+}
+renderOldestTable();
+attachSort('oldestHead', OLDEST_SORT, renderOldestTable);
 
 // Assignee breakdown table
-(function(){
+const ASSIGNEE_SORT = { field: null, dir: 1 };
+function assigneeSortValue(a, field) {
+  if (field === 'count' || field === 'overdue') return a[field];
+  return (a[field] || '').toString().toLowerCase();
+}
+function renderAssigneeTable() {
   const tot = ASSIGNEE_DATA.reduce((s,a) => s + a.count, 0) || 1;
-  const rows = ASSIGNEE_DATA.slice().sort((a,b) => b.count-a.count);
+  const base = ASSIGNEE_DATA.slice().sort((a,b) => b.count-a.count);
+  const rows = ASSIGNEE_SORT.field
+    ? sortRows(base, ASSIGNEE_SORT.field, ASSIGNEE_SORT.dir, assigneeSortValue)
+    : base;
   document.getElementById('assigneeTable').innerHTML = rows.map(a => {
     const pct = Math.round(a.count / tot * 100);
     const overdueHtml = a.overdue > 0
@@ -440,7 +510,9 @@ Chart.defaults.font  = {family:"'Inter',system-ui,sans-serif", size:11};
       + '</div></td>'
       + '</tr>';
   }).join('');
-})();
+}
+renderAssigneeTable();
+attachSort('assigneeHead', ASSIGNEE_SORT, renderAssigneeTable);
 
 // Issue log
 let PAGE = 0;
@@ -471,9 +543,17 @@ function priorityClass(p) {
   return 'priority-low';
 }
 
+const ISSUE_SORT = { field: null, dir: 1 };
+function issueSortValue(i, field) {
+  if (field === 'priority') return priorityRank(i.priority);
+  if (field === 'due') return i.due || '9999-12-31';
+  return (i[field] || '').toString().toLowerCase();
+}
+
 function renderTable() {
-  const filtered = getFiltered();
-  const page     = filtered.slice(PAGE * PAGE_SIZE, (PAGE+1) * PAGE_SIZE);
+  let filtered = getFiltered();
+  if (ISSUE_SORT.field) filtered = sortRows(filtered, ISSUE_SORT.field, ISSUE_SORT.dir, issueSortValue);
+  const page = filtered.slice(PAGE * PAGE_SIZE, (PAGE+1) * PAGE_SIZE);
 
   document.getElementById('issueTable').innerHTML = page.map(i => {
     const scopeCol = i.scope === 'home' ? '#76b900' : '#38bdf8';
@@ -502,6 +582,7 @@ function renderTable() {
 
 function changePage(d) { PAGE = Math.max(0, PAGE+d); renderTable(); }
 document.getElementById('searchInput').addEventListener('input', () => { PAGE=0; renderTable(); });
+attachSort('issueHead', ISSUE_SORT, () => { PAGE = 0; renderTable(); });
 renderTable();
 </script>
 </body>
