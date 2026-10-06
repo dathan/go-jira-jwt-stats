@@ -14,8 +14,8 @@ import (
 )
 
 const (
-	searchPath     = "/rest/api/2/search"
-	myselfPath     = "/rest/api/2/myself"
+	searchPath     = "/rest/api/3/search/jql"
+	myselfPath     = "/rest/api/3/myself"
 	captureTimeout = 5 * time.Minute
 	pollInterval   = 1 * time.Second
 )
@@ -48,7 +48,7 @@ func Capture(baseURL, curlFilePath string) (string, error) {
 	ctx, timeoutCancel := context.WithTimeout(ctx, captureTimeout)
 	defer timeoutCancel()
 
-	target := baseURL + "/secure/Dashboard.jspa"
+	target := baseURL + "/jira/your-work"
 	fmt.Fprintf(os.Stderr, "\n==> Opening browser: %s\n", target)
 	fmt.Fprintln(os.Stderr, "    Log in via SSO if prompted, then wait for the Jira dashboard to fully load.")
 	fmt.Fprintf(os.Stderr, "    Waiting up to %v...\n\n", captureTimeout)

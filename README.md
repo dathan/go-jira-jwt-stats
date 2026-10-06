@@ -19,7 +19,7 @@ once and reused via a saved curl file.
 
 ```sh
 go run ./cmd/go-jira-jwt-stats \
-  --base-url https://jirasw.nvidia.com \
+  --base-url https://nvidia.atlassian.net \
   --projects OPPEPROJ \
   --team-members jspragg,jcooper,agee,brusmith,alaing,avladimirov,brennenm,dcarr,dmateer,fengzhou,lgriffith,tflitsch,gvialetto \
   --open
@@ -32,7 +32,7 @@ captures your session and writes it to `conf/jira.curl` for reuse on future runs
 
 | Flag | Env var | Description |
 |---|---|---|
-| `--base-url` | `JIRA_BASE_URL` | Jira base URL (default `https://jirasw.nvidia.com`) |
+| `--base-url` | `JIRA_BASE_URL` | Jira base URL (default `https://nvidia.atlassian.net`) |
 | `--team-members` | `JIRA_TEAM_MEMBERS` | Comma-separated Jira usernames to track |
 | `--projects` | `JIRA_PROJECTS` | Comma-separated "home" project keys (e.g. `OPPEPROJ`) |
 | `--jql` | `JIRA_JQL` | Full JQL override, replaces the generated query entirely |

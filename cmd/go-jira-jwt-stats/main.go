@@ -24,8 +24,8 @@ import (
 )
 
 const (
-	defaultBaseURL   = "https://jirasw.nvidia.com"
-	searchPath       = "/rest/api/2/search"
+	defaultBaseURL   = "https://nvidia.atlassian.net"
+	searchPath       = "/rest/api/3/search/jql"
 	defaultOutput    = "dashboard.html"
 	defaultOutputDir = "output"
 	pageSize         = 100
@@ -34,22 +34,24 @@ const (
 // ── Jira REST API types ──────────────────────────────────────────────────────
 
 type searchRequest struct {
-	JQL        string   `json:"jql"`
-	StartAt    int      `json:"startAt"`
-	MaxResults int      `json:"maxResults"`
-	Fields     []string `json:"fields"`
+	JQL           string   `json:"jql"`
+	NextPageToken string   `json:"nextPageToken,omitempty"`
+	MaxResults    int      `json:"maxResults"`
+	Fields        []string `json:"fields"`
 }
 
+// searchResponse is the Jira Cloud enhanced-search payload, which paginates by
+// opaque token rather than startAt/total.
 type searchResponse struct {
-	StartAt    int         `json:"startAt"`
-	MaxResults int         `json:"maxResults"`
-	Total      int         `json:"total"`
-	Issues     []jiraIssue `json:"issues"`
+	Issues        []jiraIssue `json:"issues"`
+	NextPageToken string      `json:"nextPageToken"`
+	IsLast        bool        `json:"isLast"`
 }
 
 type jiraPerson struct {
 	DisplayName string `json:"displayName"`
 	Name        string `json:"name"`
+	AccountID   string `json:"accountId"`
 }
 
 func (p *jiraPerson) label() string {
@@ -59,7 +61,10 @@ func (p *jiraPerson) label() string {
 	if p.DisplayName != "" {
 		return p.DisplayName
 	}
-	return p.Name
+	if p.Name != "" {
+		return p.Name
+	}
+	return p.AccountID
 }
 
 type jiraIssue struct {
@@ -67,7 +72,10 @@ type jiraIssue struct {
 	Fields struct {
 		Summary string `json:"summary"`
 		Status  struct {
-			Name string `json:"name"`
+			Name           string `json:"name"`
+			StatusCategory struct {
+				Key string `json:"key"`
+			} `json:"statusCategory"`
 		} `json:"status"`
 		Priority *struct {
 			Name string `json:"name"`
@@ -86,10 +94,11 @@ type jiraIssue struct {
 // ── JS-serializable types (match the dashboard JS object shapes) ──────────────
 
 type jsAssigneeGroup struct {
-	Name     string   `json:"name"`
-	Count    int      `json:"count"`
-	Overdue  int      `json:"overdue"`
-	Projects []string `json:"projects"`
+	Name      string   `json:"name"`
+	AccountID string   `json:"accountId"`
+	Count     int      `json:"count"`
+	Overdue   int      `json:"overdue"`
+	Projects  []string `json:"projects"`
 }
 
 type jsIssue struct {
@@ -99,15 +108,19 @@ type jsIssue struct {
 	Scope    string `json:"scope"` // "home" | "external"
 	Assignee string `json:"assignee"`
 	Status   string `json:"status"`
-	Priority string `json:"priority"`
-	Due      string `json:"due"`
-	Overdue  bool   `json:"overdue"`
-	Created  string `json:"created"`
-	AgeDays  int    `json:"ageDays"`
+	// InProgress is true when the status belongs to Jira's "In Progress"
+	// category (statusCategory key "indeterminate"), whatever the workflow calls it.
+	InProgress bool   `json:"inProgress"`
+	Priority   string `json:"priority"`
+	Due        string `json:"due"`
+	Overdue    bool   `json:"overdue"`
+	Created    string `json:"created"`
+	AgeDays    int    `json:"ageDays"`
 }
 
 type jsCallout struct {
 	Name        string   `json:"name"`
+	AccountID   string   `json:"accountId"`
 	Count       int      `json:"count"`
 	TeamAvg     float64  `json:"teamAvg"`
 	PctAboveAvg int      `json:"pctAboveAvg"`
@@ -117,29 +130,30 @@ type jsCallout struct {
 // ── Template data ─────────────────────────────────────────────────────────────
 
 type dashData struct {
-	FetchedAt         string
-	BaseURL           string
-	BaseURLJSON       string
-	JQLEncoded        string
-	TeamLabel         string
-	HomeProjects      string
-	TotalOpen         int
-	HomeCount         int
-	ExternalCount     int
-	OverdueCount      int
-	UnassignedCount   int
-	ProjectCount      int
-	OldestDays        int
-	AvgAgeDays        int
-	HighPriorityCount int
-	OverloadedCount   int
-	AssigneesJSON     string
-	ProjectsJSON      string
-	StatusJSON        string
-	PriorityJSON      string
-	OldestJSON        string
-	CalloutsJSON      string
-	IssuesJSON        string
+	FetchedAt            string
+	BaseURL              string
+	BaseURLJSON          string
+	JQLEncoded           string
+	TeamLabel            string
+	HomeProjects         string
+	TotalOpen            int
+	HomeCount            int
+	ExternalCount        int
+	OverdueCount         int
+	UnassignedCount      int
+	ProjectCount         int
+	OldestDays           int
+	AvgAgeDays           int
+	HighPriorityCount    int
+	OverloadedCount      int
+	AssigneesJSON        string
+	ProjectsJSON         string
+	StatusJSON           string
+	PriorityJSON         string
+	OldestJSON           string
+	OldestInProgressJSON string
+	CalloutsJSON         string
+	IssuesJSON           string
 
 	// Per-KPI JQL links — each card on the dashboard opens the matching
 	// filtered view directly in Jira.
@@ -241,6 +255,7 @@ func main() {
 	outputDir := flag.String("output-dir", defaultOutputDir, "Directory to write the dashboard HTML file into")
 	open := flag.Bool("open", false, "Open dashboard in browser after writing")
 	flag.Parse()
+	*baseURL = normalizeBaseURL(*baseURL)
 
 	if err := os.MkdirAll(*outputDir, 0o755); err != nil {
 		log.Fatalf("create output dir %q: %v", *outputDir, err)
@@ -322,7 +337,8 @@ func main() {
 		log.Fatalf("parse template: %v", err)
 	}
 
-	data := buildDash(issues, *baseURL, jql, members, homeProjects)
+	names := resolveNames(cookieStr, *baseURL, members, issues)
+	data := buildDash(issues, *baseURL, jql, displayMembers(members, names), homeProjects)
 
 	outPath := filepath.Join(*outputDir, strings.TrimSuffix(*output, ".html")+".html")
 	f, err := os.Create(outPath)
@@ -341,6 +357,16 @@ func main() {
 	if *open {
 		openBrowser(abs)
 	}
+}
+
+// normalizeBaseURL defaults a bare host (e.g. "nvidia.atlassian.net") to https
+// and strips trailing slashes so path concatenation is safe.
+func normalizeBaseURL(raw string) string {
+	u := strings.TrimRight(strings.TrimSpace(raw), "/")
+	if u != "" && !strings.Contains(u, "://") {
+		u = "https://" + u
+	}
+	return u
 }
 
 func envOr(key, fallback string) string {
@@ -373,6 +399,7 @@ const (
 	overloadMultiplier = 1.5
 	minOverloadCount   = 3
 	oldestItemsLimit   = 10
+	inProgressCategory = "indeterminate"
 )
 
 func isHighPriority(name string) bool {
@@ -385,9 +412,10 @@ func isHighPriority(name string) bool {
 // account can see — this is what surfaces asks coming in from outside the
 // team's own project(s).
 func buildJQL(members []string, extra string) string {
+	// Cloud accountIds contain colons, so each must be a quoted JQL string.
 	quoted := make([]string, len(members))
 	for i, m := range members {
-		quoted[i] = m
+		quoted[i] = `"` + strings.ReplaceAll(m, `"`, `\"`) + `"`
 	}
 	jql := fmt.Sprintf("assignee in (%s) AND resolution = Unresolved", strings.Join(quoted, ", "))
 	if extra != "" {
@@ -424,14 +452,20 @@ func fetchAll(cookieStr, baseURL, jql string) ([]jiraIssue, error) {
 	apiURL := baseURL + searchPath
 	fields := []string{"summary", "status", "priority", "assignee", "reporter", "project", "duedate", "created"}
 	var all []jiraIssue
-	startAt := 0
+	pageToken := ""
+
+	// Jira Cloud answers an unauthenticated search with 200 and zero issues,
+	// which would render an empty dashboard. Verify the session up front.
+	if err := checkSession(cookieStr, baseURL); err != nil {
+		return nil, err
+	}
 
 	for {
 		req := searchRequest{
-			JQL:        jql,
-			StartAt:    startAt,
-			MaxResults: pageSize,
-			Fields:     fields,
+			JQL:           jql,
+			NextPageToken: pageToken,
+			MaxResults:    pageSize,
+			Fields:        fields,
 		}
 
 		body, err := json.Marshal(req)
@@ -447,7 +481,7 @@ func fetchAll(cookieStr, baseURL, jql string) ([]jiraIssue, error) {
 		httpReq.Header.Set("Accept", "application/json")
 		httpReq.Header.Set("Cookie", cookieStr)
 		httpReq.Header.Set("X-Atlassian-Token", "no-check")
-		httpReq.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36")
+		httpReq.Header.Set("User-Agent", userAgent)
 		httpReq.Header.Set("Origin", baseURL)
 		httpReq.Header.Set("Referer", baseURL+"/issues/")
 
@@ -486,12 +520,98 @@ func fetchAll(cookieStr, baseURL, jql string) ([]jiraIssue, error) {
 		resp.Body.Close()
 
 		all = append(all, result.Issues...)
-		startAt += len(result.Issues)
-		if len(result.Issues) == 0 || startAt >= result.Total {
+		pageToken = result.NextPageToken
+		if result.IsLast || pageToken == "" || len(result.Issues) == 0 {
 			break
 		}
 	}
 	return all, nil
+}
+
+const userAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36"
+
+// cloudGet issues an authenticated GET against the Jira Cloud REST API.
+func cloudGet(cookieStr, rawURL string) (*http.Response, error) {
+	req, err := http.NewRequest(http.MethodGet, rawURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Cookie", cookieStr)
+	req.Header.Set("User-Agent", userAgent)
+	return http.DefaultClient.Do(req)
+}
+
+// checkSession returns an "HTTP 401" error when the cookies are not accepted.
+func checkSession(cookieStr, baseURL string) error {
+	resp, err := cloudGet(cookieStr, baseURL+"/rest/api/3/myself")
+	if err != nil {
+		return fmt.Errorf("http: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("HTTP %d: cookies are not valid for %s (capture a session from that site)", resp.StatusCode, baseURL)
+	}
+	return nil
+}
+
+// resolveNames maps Jira account IDs to display names. Names seen on fetched
+// issues win; remaining IDs are looked up via the user API. Anything that
+// cannot be resolved stays as the raw ID.
+func resolveNames(cookieStr, baseURL string, ids []string, issues []jiraIssue) map[string]string {
+	names := map[string]string{}
+	for _, is := range issues {
+		for _, p := range []*jiraPerson{is.Fields.Assignee, is.Fields.Reporter} {
+			if p != nil && p.AccountID != "" && p.DisplayName != "" {
+				names[p.AccountID] = p.DisplayName
+			}
+		}
+	}
+	for _, id := range ids {
+		if _, ok := names[id]; ok {
+			continue
+		}
+		resp, err := cloudGet(cookieStr, baseURL+"/rest/api/3/user?accountId="+url.QueryEscape(id))
+		if err != nil {
+			log.Printf("names: lookup %s: %v", id, err)
+			continue
+		}
+		var u jiraPerson
+		if resp.StatusCode == http.StatusOK && json.NewDecoder(resp.Body).Decode(&u) == nil && u.DisplayName != "" {
+			names[id] = u.DisplayName
+		}
+		resp.Body.Close()
+	}
+	return names
+}
+
+// displayMembers returns each member's name, falling back to the raw value.
+func displayMembers(members []string, names map[string]string) []string {
+	out := make([]string, len(members))
+	for i, m := range members {
+		if n, ok := names[m]; ok {
+			out[i] = n
+		} else {
+			out[i] = m
+		}
+	}
+	return out
+}
+
+// oldestItems returns the oldest oldestItemsLimit issues whose in-progress
+// state matches inProgress, oldest first.
+func oldestItems(issues []jsIssue, inProgress bool) []jsIssue {
+	out := make([]jsIssue, 0, len(issues))
+	for _, i := range issues {
+		if i.InProgress == inProgress {
+			out = append(out, i)
+		}
+	}
+	sort.SliceStable(out, func(a, b int) bool { return out[a].AgeDays > out[b].AgeDays })
+	if len(out) > oldestItemsLimit {
+		out = out[:oldestItemsLimit]
+	}
+	return out
 }
 
 // buildDash processes raw issues into the struct the HTML template needs.
@@ -563,7 +683,11 @@ func buildDash(issues []jiraIssue, baseURL, jql string, members, homeProjects []
 
 		ag, ok := agMap[assignee]
 		if !ok {
-			ag = &agState{jsAssigneeGroup: jsAssigneeGroup{Name: assignee}, projectSet: map[string]bool{}}
+			accountID := ""
+			if inc.Fields.Assignee != nil {
+				accountID = inc.Fields.Assignee.AccountID
+			}
+			ag = &agState{jsAssigneeGroup: jsAssigneeGroup{Name: assignee, AccountID: accountID}, projectSet: map[string]bool{}}
 			agMap[assignee] = ag
 		}
 		ag.Count++
@@ -577,17 +701,18 @@ func buildDash(issues []jiraIssue, baseURL, jql string, members, homeProjects []
 		priorityMap[priority]++
 
 		jsIssues = append(jsIssues, jsIssue{
-			Key:      inc.Key,
-			Summary:  inc.Fields.Summary,
-			Project:  projectKey,
-			Scope:    scope,
-			Assignee: assignee,
-			Status:   inc.Fields.Status.Name,
-			Priority: priority,
-			Due:      due,
-			Overdue:  overdue,
-			Created:  created,
-			AgeDays:  ageDays,
+			Key:        inc.Key,
+			Summary:    inc.Fields.Summary,
+			Project:    projectKey,
+			Scope:      scope,
+			Assignee:   assignee,
+			Status:     inc.Fields.Status.Name,
+			InProgress: inc.Fields.Status.StatusCategory.Key == inProgressCategory,
+			Priority:   priority,
+			Due:        due,
+			Overdue:    overdue,
+			Created:    created,
+			AgeDays:    ageDays,
 		})
 	}
 
@@ -625,6 +750,7 @@ func buildDash(issues []jiraIssue, baseURL, jql string, members, homeProjects []
 		}
 		callouts = append(callouts, jsCallout{
 			Name:        ag.Name,
+			AccountID:   ag.AccountID,
 			Count:       ag.Count,
 			TeamAvg:     math.Round(teamAvg*10) / 10,
 			PctAboveAvg: pctAbove,
@@ -632,12 +758,8 @@ func buildDash(issues []jiraIssue, baseURL, jql string, members, homeProjects []
 		})
 	}
 
-	oldestIssues := make([]jsIssue, len(jsIssues))
-	copy(oldestIssues, jsIssues)
-	sort.Slice(oldestIssues, func(i, j int) bool { return oldestIssues[i].AgeDays > oldestIssues[j].AgeDays })
-	if len(oldestIssues) > oldestItemsLimit {
-		oldestIssues = oldestIssues[:oldestItemsLimit]
-	}
+	oldestIssues := oldestItems(jsIssues, false)
+	oldestInProgress := oldestItems(jsIssues, true)
 
 	avgAgeDays := 0
 	if len(issues) > 0 {
@@ -666,29 +788,30 @@ func buildDash(issues []jiraIssue, baseURL, jql string, members, homeProjects []
 	}
 
 	return dashData{
-		FetchedAt:         now.Format("Jan 2 2006 15:04 MST"),
-		BaseURL:           baseURL,
-		BaseURLJSON:       mustJSON(baseURL),
-		JQLEncoded:        url.QueryEscape(jql),
-		TeamLabel:         strings.Join(members, ", "),
-		HomeProjects:      strings.Join(homeProjects, ", "),
-		TotalOpen:         len(issues),
-		HomeCount:         homeCount,
-		ExternalCount:     externalCount,
-		OverdueCount:      overdueCount,
-		UnassignedCount:   unassignedCount,
-		ProjectCount:      len(projectMap),
-		OldestDays:        oldestDays,
-		AvgAgeDays:        avgAgeDays,
-		HighPriorityCount: highPriorityCount,
-		OverloadedCount:   len(callouts),
-		AssigneesJSON:     mustJSON(assignees),
-		ProjectsJSON:      mustJSON(projectMap),
-		StatusJSON:        mustJSON(statusMap),
-		PriorityJSON:      mustJSON(priorityMap),
-		OldestJSON:        mustJSON(oldestIssues),
-		CalloutsJSON:      mustJSON(callouts),
-		IssuesJSON:        mustJSON(jsIssues),
+		FetchedAt:            now.Format("Jan 2 2006 15:04 MST"),
+		BaseURL:              baseURL,
+		BaseURLJSON:          mustJSON(baseURL),
+		JQLEncoded:           url.QueryEscape(jql),
+		TeamLabel:            strings.Join(members, ", "),
+		HomeProjects:         strings.Join(homeProjects, ", "),
+		TotalOpen:            len(issues),
+		HomeCount:            homeCount,
+		ExternalCount:        externalCount,
+		OverdueCount:         overdueCount,
+		UnassignedCount:      unassignedCount,
+		ProjectCount:         len(projectMap),
+		OldestDays:           oldestDays,
+		AvgAgeDays:           avgAgeDays,
+		HighPriorityCount:    highPriorityCount,
+		OverloadedCount:      len(callouts),
+		AssigneesJSON:        mustJSON(assignees),
+		ProjectsJSON:         mustJSON(projectMap),
+		StatusJSON:           mustJSON(statusMap),
+		PriorityJSON:         mustJSON(priorityMap),
+		OldestJSON:           mustJSON(oldestIssues),
+		OldestInProgressJSON: mustJSON(oldestInProgress),
+		CalloutsJSON:         mustJSON(callouts),
+		IssuesJSON:           mustJSON(jsIssues),
 
 		HomeJQLEncoded:         url.QueryEscape(homeJQL),
 		ExternalJQLEncoded:     url.QueryEscape(externalJQL),

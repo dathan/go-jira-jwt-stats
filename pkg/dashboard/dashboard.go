@@ -175,7 +175,7 @@ const DashboardTemplate = `<!DOCTYPE html>
   </div>
 
   <div class="card p-5 mb-4">
-    <h2 class="text-sm font-semibold text-slate-300 mb-4">Oldest Open Items <span class="text-slate-500 font-normal text-xs">— top 10 by age, oldest first</span></h2>
+    <h2 class="text-sm font-semibold text-slate-300 mb-4">Oldest Open Items <span class="text-slate-500 font-normal text-xs">— not in progress, top 10 by age</span></h2>
     <div class="overflow-x-auto">
       <table>
         <thead id="oldestHead"><tr>
@@ -183,12 +183,33 @@ const DashboardTemplate = `<!DOCTYPE html>
           <th class="sortable" data-field="summary">Summary<span class="sort-ind"></span></th>
           <th class="sortable" data-field="project">Project<span class="sort-ind"></span></th>
           <th class="sortable" data-field="assignee">Assignee<span class="sort-ind"></span></th>
+          <th class="sortable" data-field="status">Status<span class="sort-ind"></span></th>
           <th class="sortable" data-field="priority">Priority<span class="sort-ind"></span></th>
           <th class="sortable" data-field="created">Created<span class="sort-ind"></span></th>
           <th class="sortable" data-field="ageDays">Age<span class="sort-ind"></span></th>
           <th></th>
         </tr></thead>
         <tbody id="oldestTable"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="card p-5 mb-4">
+    <h2 class="text-sm font-semibold text-slate-300 mb-4">Oldest Open In Progress Items <span class="text-slate-500 font-normal text-xs">— started but still open, top 10 by age</span></h2>
+    <div class="overflow-x-auto">
+      <table>
+        <thead id="oldestIpHead"><tr>
+          <th class="sortable" data-field="key">Key<span class="sort-ind"></span></th>
+          <th class="sortable" data-field="summary">Summary<span class="sort-ind"></span></th>
+          <th class="sortable" data-field="project">Project<span class="sort-ind"></span></th>
+          <th class="sortable" data-field="assignee">Assignee<span class="sort-ind"></span></th>
+          <th class="sortable" data-field="status">Status<span class="sort-ind"></span></th>
+          <th class="sortable" data-field="priority">Priority<span class="sort-ind"></span></th>
+          <th class="sortable" data-field="created">Created<span class="sort-ind"></span></th>
+          <th class="sortable" data-field="ageDays">Age<span class="sort-ind"></span></th>
+          <th></th>
+        </tr></thead>
+        <tbody id="oldestIpTable"></tbody>
       </table>
     </div>
   </div>
@@ -239,6 +260,7 @@ const PROJECT_DATA   = {{.ProjectsJSON}};
 const STATUS_DATA    = {{.StatusJSON}};
 const PRIORITY_DATA  = {{.PriorityJSON}};
 const OLDEST_DATA    = {{.OldestJSON}};
+const OLDEST_IP_DATA = {{.OldestInProgressJSON}};
 const CALLOUTS_DATA  = {{.CalloutsJSON}};
 const ISSUES         = {{.IssuesJSON}};
 const BASE_URL       = {{.BaseURLJSON}};
@@ -246,6 +268,12 @@ const BASE_URL       = {{.BaseURLJSON}};
 // ── Colour palette ───────────────────────────────────────────────────────────
 const PALETTE = ['#38bdf8','#a78bfa','#84cc16','#fbbf24','#fb923c','#f472b6','#2dd4bf','#76b900','#f87171','#c084fc'];
 function colorFor(key, list) { const i = list.indexOf(key); return PALETTE[i % PALETTE.length] || '#64748b'; }
+// assigneeUrl opens Jira's issue search for one assignee's open issues
+// (or the unassigned queue when there is no account ID).
+function assigneeUrl(accountId) {
+  const who = accountId ? 'assignee = "'+accountId+'"' : 'assignee is EMPTY';
+  return BASE_URL+'/issues/?jql='+encodeURIComponent(who+' AND resolution = Unresolved ORDER BY due ASC, created ASC');
+}
 function keyLink(key) {
   return '<a href="'+BASE_URL+'/browse/'+key+'" target="_blank" class="mono text-slate-300 hover:text-lime-400 hover:underline" style="font-size:inherit">'+key+'</a>';
 }
@@ -443,43 +471,46 @@ Chart.defaults.font  = {family:"'Inter',system-ui,sans-serif", size:11};
     return;
   }
   grid.innerHTML = CALLOUTS_DATA.map(c => {
-    return '<div class="callout-card p-4">'
+    return '<a href="'+assigneeUrl(c.accountId)+'" target="_blank" rel="noopener" class="callout-card p-4 block hover:brightness-125" style="text-decoration:none">'
       + '<div class="flex items-center justify-between mb-1.5">'
       +   '<span class="text-sm font-semibold text-slate-100">'+c.name+'</span>'
       +   '<span class="badge priority-highest">+'+c.pctAboveAvg+'%</span>'
       + '</div>'
       + '<div class="text-2xl font-black text-red-400">'+c.count+'<span class="text-xs font-medium text-slate-500 ml-1">open issues</span></div>'
       + '<div class="text-xs text-slate-500 mt-1">team average is '+c.teamAvg+' &middot; '+c.projects.join(', ')+'</div>'
-      + '</div>';
+      + '</a>';
   }).join('');
 })();
 
-// Oldest open items table
-const OLDEST_SORT = { field: null, dir: 1 };
+// Oldest open items tables (not in progress / in progress)
 function oldestSortValue(i, field) {
   if (field === 'priority') return priorityRank(i.priority);
   if (field === 'ageDays') return i.ageDays;
   return (i[field] || '').toString().toLowerCase();
 }
-function renderOldestTable() {
-  const rows = OLDEST_SORT.field
-    ? sortRows(OLDEST_DATA, OLDEST_SORT.field, OLDEST_SORT.dir, oldestSortValue)
-    : OLDEST_DATA;
-  document.getElementById('oldestTable').innerHTML = rows.map(i => {
-    return '<tr>'
-      + '<td class="text-xs">'+keyLink(i.key)+'</td>'
-      + '<td class="text-slate-200 text-xs font-medium" style="max-width:320px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+i.summary+'</td>'
-      + '<td class="mono text-slate-400 text-xs">'+i.project+'</td>'
-      + '<td class="text-slate-300 text-xs">'+i.assignee+'</td>'
-      + '<td><span class="badge '+priorityClass(i.priority)+'">'+i.priority+'</span></td>'
-      + '<td class="text-slate-400 text-xs mono">'+i.created+'</td>'
-      + '<td class="text-rose-400 text-xs mono font-semibold">'+i.ageDays+'d</td>'
-      + '<td><a href="'+BASE_URL+'/browse/'+i.key+'" target="_blank" style="color:#334155;font-size:12px" onmouseover="this.style.color=\'#84cc16\'" onmouseout="this.style.color=\'#334155\'">&#8599;</a></td>'
-      + '</tr>';
-  }).join('');
+function setupOldestTable(headId, bodyId, data) {
+  const state = { field: null, dir: 1 };
+  function render() {
+    const rows = state.field ? sortRows(data, state.field, state.dir, oldestSortValue) : data;
+    document.getElementById(bodyId).innerHTML = rows.map(i => {
+      return '<tr>'
+        + '<td class="text-xs">'+keyLink(i.key)+'</td>'
+        + '<td class="text-slate-200 text-xs font-medium" style="max-width:320px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+i.summary+'</td>'
+        + '<td class="mono text-slate-400 text-xs">'+i.project+'</td>'
+        + '<td class="text-slate-300 text-xs">'+i.assignee+'</td>'
+        + '<td class="text-slate-400 text-xs">'+i.status+'</td>'
+        + '<td><span class="badge '+priorityClass(i.priority)+'">'+i.priority+'</span></td>'
+        + '<td class="text-slate-400 text-xs mono">'+i.created+'</td>'
+        + '<td class="text-rose-400 text-xs mono font-semibold">'+i.ageDays+'d</td>'
+        + '<td><a href="'+BASE_URL+'/browse/'+i.key+'" target="_blank" style="color:#334155;font-size:12px" onmouseover="this.style.color=\'#84cc16\'" onmouseout="this.style.color=\'#334155\'">&#8599;</a></td>'
+        + '</tr>';
+    }).join('') || '<tr><td colspan="9" class="text-xs text-slate-500">Nothing here.</td></tr>';
+  }
+  render();
+  attachSort(headId, state, render);
 }
-renderOldestTable();
-attachSort('oldestHead', OLDEST_SORT, renderOldestTable);
+setupOldestTable('oldestHead', 'oldestTable', OLDEST_DATA);
+setupOldestTable('oldestIpHead', 'oldestIpTable', OLDEST_IP_DATA);
 
 // Assignee breakdown table
 const ASSIGNEE_SORT = { field: null, dir: 1 };
@@ -500,7 +531,7 @@ function renderAssigneeTable() {
       : '<span style="color:#334155">—</span>';
     return '<tr>'
       + '<td class="mono text-slate-200 font-medium">'+a.name+'</td>'
-      + '<td class="text-white font-bold text-base">'+a.count+'</td>'
+      + '<td class="text-white font-bold text-base"><a href="'+assigneeUrl(a.accountId)+'" target="_blank" rel="noopener" class="hover:text-lime-400 hover:underline">'+a.count+'</a></td>'
       + '<td class="mono text-slate-400 text-xs">'+a.projects.join(', ')+'</td>'
       + '<td>'+overdueHtml+'</td>'
       + '<td><div class="flex items-center gap-2">'
