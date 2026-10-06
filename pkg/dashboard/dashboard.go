@@ -58,7 +58,8 @@ const DashboardTemplate = `<!DOCTYPE html>
       </div>
       <div>
         <h1 class="text-xl font-bold tracking-tight gradient-text">Team Jira Dashboard</h1>
-        <p class="text-xs text-slate-500 mt-0.5">Home projects <code class="mono text-slate-400">{{.HomeProjects}}</code> &middot; Team <code class="mono text-slate-400">{{.TeamLabel}}</code></p>
+        <p class="text-xs text-slate-500 mt-0.5">Home projects {{range $i, $l := .HomeProjectLinks}}{{if $i}}, {{end}}<a href="{{$l.URL}}" target="_blank" rel="noopener" class="mono text-slate-400 hover:text-lime-400 hover:underline">{{$l.Label}}</a>{{end}}</p>
+        <p class="text-xs text-slate-500 mt-0.5">Team {{range $i, $l := .TeamLinks}}{{if $i}}, {{end}}<a href="{{$l.URL}}" target="_blank" rel="noopener" class="text-slate-400 hover:text-lime-400 hover:underline">{{$l.Label}}</a>{{end}}</p>
       </div>
     </div>
     <div class="flex items-center gap-3 text-xs text-slate-500">
@@ -80,7 +81,7 @@ const DashboardTemplate = `<!DOCTYPE html>
     <a href="{{.BaseURL}}/issues/?jql={{.HomeJQLEncoded}}" target="_blank" class="kpi-card p-4">
       <div class="text-xs text-slate-500 font-semibold uppercase tracking-widest mb-1.5">Home Backlog</div>
       <div class="text-3xl font-black" style="color:#76b900">{{.HomeCount}}</div>
-      <div class="text-xs text-slate-600 mt-1">in {{.HomeProjects}}</div>
+      <div class="text-xs text-slate-600 mt-1">across {{len .HomeProjectLinks}} home projects</div>
     </a>
     <a href="{{.BaseURL}}/issues/?jql={{.ExternalJQLEncoded}}" target="_blank" class="kpi-card p-4">
       <div class="text-xs text-slate-500 font-semibold uppercase tracking-widest mb-1.5">External Asks</div>

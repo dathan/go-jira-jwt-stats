@@ -20,7 +20,6 @@ once and reused via a saved curl file.
 ```sh
 go run ./cmd/go-jira-jwt-stats \
   --base-url https://nvidia.atlassian.net \
-  --projects OPPEPROJ \
   --team-members jspragg,jcooper,agee,brusmith,alaing,avladimirov,brennenm,dcarr,dmateer,fengzhou,lgriffith,tflitsch,gvialetto \
   --open
 ```
@@ -33,8 +32,8 @@ captures your session and writes it to `conf/jira.curl` for reuse on future runs
 | Flag | Env var | Description |
 |---|---|---|
 | `--base-url` | `JIRA_BASE_URL` | Jira base URL (default `https://nvidia.atlassian.net`) |
-| `--team-members` | `JIRA_TEAM_MEMBERS` | Comma-separated Jira usernames to track |
-| `--projects` | `JIRA_PROJECTS` | Comma-separated "home" project keys (e.g. `OPPEPROJ`) |
+| `--team-members` | `JIRA_TEAM_MEMBERS` | Comma-separated Jira account IDs to track |
+| `--projects` | `JIRA_PROJECTS` | Optional "home" project keys (e.g. `OPPEPROJ`). Default: every project your team has open issues in |
 | `--jql` | `JIRA_JQL` | Full JQL override, replaces the generated query entirely |
 | `--jql-extra` | `JIRA_JQL_EXTRA` | Extra clause ANDed onto the generated JQL |
 | `--curl-file` | `JIRA_CURL_FILE` | Path to a curl command copied from DevTools (or `-` for stdin) |
@@ -48,8 +47,9 @@ Without `--jql`, the tool builds:
 assignee in (<team-members>) AND resolution = Unresolved ORDER BY due ASC, created ASC
 ```
 
-Issues in a `--projects` project are shown as your team's own backlog; every other
-project is treated as an external ask on the team.
+Home projects are derived from the projects your team members have open issues in, and
+shown (linked to Jira) in the dashboard header. Pass `--projects` to restrict "home" to
+specific projects; issues elsewhere are then treated as external asks on the team.
 
 ### Auth without a browser
 
@@ -58,7 +58,7 @@ Paste a curl command copied from DevTools instead of doing an interactive login:
 ```sh
 # In Chrome: DevTools → Network → any request → right-click → Copy as cURL
 pbpaste > /tmp/jira.curl
-go run ./cmd/go-jira-jwt-stats --curl-file /tmp/jira.curl --projects OPPEPROJ --team-members ... --open
+go run ./cmd/go-jira-jwt-stats --curl-file /tmp/jira.curl --team-members ... --open
 ```
 
 ## Features

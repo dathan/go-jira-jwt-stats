@@ -129,13 +129,61 @@ type jsCallout struct {
 
 // ── Template data ─────────────────────────────────────────────────────────────
 
+// navLink is a labelled link into a Jira issue search, used in the header.
+type navLink struct {
+	Label string
+	URL   string
+}
+
+func jiraSearchURL(baseURL, jql string) string {
+	return baseURL + "/issues/?jql=" + url.QueryEscape(jql)
+}
+
+// projectLinks links each project to the team's open issues in that project.
+func projectLinks(baseURL, where, order string, projects []string) []navLink {
+	links := make([]navLink, len(projects))
+	for i, p := range projects {
+		jql := fmt.Sprintf("%s AND project = %q%s", where, p, order)
+		links[i] = navLink{Label: p, URL: jiraSearchURL(baseURL, jql)}
+	}
+	return links
+}
+
+// teamLinks links each team member (by display name) to their open issues.
+func teamLinks(baseURL string, members []string, names map[string]string) []navLink {
+	links := make([]navLink, len(members))
+	for i, m := range members {
+		label := m
+		if n, ok := names[m]; ok {
+			label = n
+		}
+		jql := fmt.Sprintf("assignee = %q AND resolution = Unresolved ORDER BY due ASC, created ASC", m)
+		links[i] = navLink{Label: label, URL: jiraSearchURL(baseURL, jql)}
+	}
+	return links
+}
+
+// projectsFromIssues returns the sorted, de-duplicated project keys of issues.
+func projectsFromIssues(issues []jiraIssue) []string {
+	seen := map[string]bool{}
+	var keys []string
+	for _, is := range issues {
+		if k := is.Fields.Project.Key; k != "" && !seen[k] {
+			seen[k] = true
+			keys = append(keys, k)
+		}
+	}
+	sort.Strings(keys)
+	return keys
+}
+
 type dashData struct {
 	FetchedAt            string
 	BaseURL              string
 	BaseURLJSON          string
 	JQLEncoded           string
-	TeamLabel            string
-	HomeProjects         string
+	HomeProjectLinks     []navLink
+	TeamLinks            []navLink
 	TotalOpen            int
 	HomeCount            int
 	ExternalCount        int
@@ -241,11 +289,11 @@ func main() {
 			"  export JIRA_COOKIES='JSESSIONID=...; atlassian.xsrf.token=...'")
 	baseURL := flag.String("base-url", envOr("JIRA_BASE_URL", defaultBaseURL), "Jira base URL")
 	teamMembers := flag.String("team-members", os.Getenv("JIRA_TEAM_MEMBERS"),
-		"Comma-separated Jira usernames whose obligations you want to track (required)")
+		"Comma-separated Jira account IDs whose obligations you want to track (required)")
 	projects := flag.String("projects", os.Getenv("JIRA_PROJECTS"),
-		"Comma-separated Jira project keys your team owns (e.g. OPPEPROJ). Issues in these\n"+
-			"projects are 'home' backlog; issues elsewhere assigned to your team members are\n"+
-			"'external' asks. (required)")
+		"Optional comma-separated Jira project keys your team owns (e.g. OPPEPROJ). When unset,\n"+
+			"every project your team members have open issues in is treated as 'home'. When set,\n"+
+			"issues elsewhere assigned to your team members are surfaced as 'external' asks.")
 	jqlOverride := flag.String("jql", os.Getenv("JIRA_JQL"),
 		"Full JQL override. When unset, a JQL is built from --team-members:\n"+
 			"  assignee in (...) AND resolution = Unresolved ORDER BY due ASC, created ASC")
@@ -267,9 +315,6 @@ func main() {
 	var missing []string
 	if len(members) == 0 && *jqlOverride == "" {
 		missing = append(missing, "--team-members")
-	}
-	if len(homeProjects) == 0 {
-		missing = append(missing, "--projects")
 	}
 	if len(missing) > 0 {
 		usageString(missing)
@@ -332,13 +377,18 @@ func main() {
 	}
 	log.Printf("fetched %d open issues", len(issues))
 
+	if len(homeProjects) == 0 {
+		homeProjects = projectsFromIssues(issues)
+		log.Printf("projects: derived %d home projects from team issues: %s", len(homeProjects), strings.Join(homeProjects, ", "))
+	}
+
 	tmpl, err := template.New("dash").Parse(dashboard.DashboardTemplate)
 	if err != nil {
 		log.Fatalf("parse template: %v", err)
 	}
 
 	names := resolveNames(cookieStr, *baseURL, members, issues)
-	data := buildDash(issues, *baseURL, jql, displayMembers(members, names), homeProjects)
+	data := buildDash(issues, *baseURL, jql, members, names, homeProjects)
 
 	outPath := filepath.Join(*outputDir, strings.TrimSuffix(*output, ".html")+".html")
 	f, err := os.Create(outPath)
@@ -585,19 +635,6 @@ func resolveNames(cookieStr, baseURL string, ids []string, issues []jiraIssue) m
 	return names
 }
 
-// displayMembers returns each member's name, falling back to the raw value.
-func displayMembers(members []string, names map[string]string) []string {
-	out := make([]string, len(members))
-	for i, m := range members {
-		if n, ok := names[m]; ok {
-			out[i] = n
-		} else {
-			out[i] = m
-		}
-	}
-	return out
-}
-
 // oldestItems returns the oldest oldestItemsLimit issues whose in-progress
 // state matches inProgress, oldest first.
 func oldestItems(issues []jsIssue, inProgress bool) []jsIssue {
@@ -615,7 +652,7 @@ func oldestItems(issues []jsIssue, inProgress bool) []jsIssue {
 }
 
 // buildDash processes raw issues into the struct the HTML template needs.
-func buildDash(issues []jiraIssue, baseURL, jql string, members, homeProjects []string) dashData {
+func buildDash(issues []jiraIssue, baseURL, jql string, members []string, names map[string]string, homeProjects []string) dashData {
 	home := map[string]bool{}
 	for _, p := range homeProjects {
 		home[strings.ToUpper(p)] = true
@@ -792,8 +829,8 @@ func buildDash(issues []jiraIssue, baseURL, jql string, members, homeProjects []
 		BaseURL:              baseURL,
 		BaseURLJSON:          mustJSON(baseURL),
 		JQLEncoded:           url.QueryEscape(jql),
-		TeamLabel:            strings.Join(members, ", "),
-		HomeProjects:         strings.Join(homeProjects, ", "),
+		HomeProjectLinks:     projectLinks(baseURL, where, order, homeProjects),
+		TeamLinks:            teamLinks(baseURL, members, names),
 		TotalOpen:            len(issues),
 		HomeCount:            homeCount,
 		ExternalCount:        externalCount,
